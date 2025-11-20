@@ -7,3 +7,7 @@ orchestrator/__pycache__/
 
 # локальная память бота
 memory/
+
+.env
+.env.local
+*.local.yaml
