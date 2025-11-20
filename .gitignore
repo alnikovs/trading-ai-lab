@@ -1,0 +1,9 @@
+# локальные конфиги с ключами
+orchestrator/config.json
+
+# кэш python
+__pycache__/
+orchestrator/__pycache__/
+
+# локальная память бота
+memory/

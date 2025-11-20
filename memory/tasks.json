@@ -1,0 +1,28 @@
+{
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Создать минимальный оркестратор",
+      "status": "done",
+      "description": "Бэкенд с FastAPI, /chat, история сообщений",
+      "created_at": "2025-11-18",
+      "updated_at": "2025-11-18"
+    },
+    {
+      "id": "T002",
+      "title": "Подключить project_summary.md к системному промпту",
+      "status": "done",
+      "description": "Ассистент видит описание проекта при каждом запросе",
+      "created_at": "2025-11-18",
+      "updated_at": "2025-11-18"
+    },
+    {
+      "id": "T003",
+      "title": "Добавить систему задач tasks.json",
+      "status": "in_progress",
+      "description": "Сделать так, чтобы ассистент видел список задач",
+      "created_at": "2025-11-18",
+      "updated_at": "2025-11-18"
+    }
+  ]
+}
