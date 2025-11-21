@@ -11,9 +11,15 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import openai
 
+try:
+    from orchestrator.ping_dev import router as ping_dev_router
+except ModuleNotFoundError:  # pragma: no cover
+    from ping_dev import router as ping_dev_router  # type: ignore
+
 load_dotenv()
 
 app = FastAPI()
+app.include_router(ping_dev_router)
 
 CONFIG_DIR = Path(__file__).parent
 MEMORY_DIR = Path(__file__).parent.parent / "memory"
