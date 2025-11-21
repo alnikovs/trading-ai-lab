@@ -10,10 +10,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import openai
+from health_check import router as health_router
 
 load_dotenv()
 
 app = FastAPI()
+app.include_router(health_router)
 
 CONFIG_DIR = Path(__file__).parent
 MEMORY_DIR = Path(__file__).parent.parent / "memory"
