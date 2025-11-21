@@ -1,7 +1,0 @@
-{
-  "openai_api_key": "YOUR_OPENAI_API_KEY",
-  "model": "gpt-4.1-mini",
-  "cursor_base_url": "https://api.cursor.com",
-  "cursor_api_key": "YOUR_CURSOR_API_KEY",
-  "cursor_repository": "https://github.com/alnikovs/trading-ai-lab"
-}

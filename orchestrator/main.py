@@ -1,188 +1,104 @@
+from orchestrator.config import (
+    HyperliquidConfig,
+    AlloraConfig,
+    OpenAIConfig,
+    BotConfig,
+    TelegramConfig,
+    OrchestratorConfig,
+    CursorConfig,
+    validate_required,
+    get_key_preview,
+)
+from orchestrator.routers.status import router as status_router
+from orchestrator.routers.cursor_test import router as cursor_test_router
+from orchestrator.routers.cursor_webhook import router as cursor_webhook_router
+from orchestrator.cursor_client import create_cursor_agent, get_cursor_agent_status
+from orchestrator.llm_router import IncomingMessage, handle_message
+from orchestrator.dev_agent_store import get_dev_agent_store, DevAgentStore
+from orchestrator.logging_utils import setup_logging
+from orchestrator.memory_store import (
+    load_config,
+    load_message_history,
+    save_messages,
+    load_ai_contract,
+    load_project_summary,
+    load_tasks,
+    save_tasks,
+    load_recent_results,
+    load_commands,
+    save_commands,
+)
+from orchestrator.telegram_bot import handle_telegram_update, send_telegram_message
+
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
-from dotenv import load_dotenv
 import openai
-
-load_dotenv()
 
 app = FastAPI()
 
 CONFIG_DIR = Path(__file__).parent
 MEMORY_DIR = Path(__file__).parent.parent / "memory"
+LOGS_DIR = Path(__file__).parent.parent / "logs"
 
-config = None
-openai_client = None
-
-
-def load_config() -> Dict:
-    global config, openai_client
-    
-    config_path = CONFIG_DIR / "config.json"
-    if not config_path.exists():
-        config_path = CONFIG_DIR / "config.example.json"
-    
-    if not config_path.exists():
-        raise FileNotFoundError("Neither config.json nor config.example.json found")
-    
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-    
-    api_key = config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "YOUR_API_KEY_HERE":
-        raise ValueError("OpenAI API key not configured")
-    
-    openai_client = openai.OpenAI(api_key=api_key)
-    
-    return config
+logger = setup_logging(LOGS_DIR, "orchestrator")
 
 
-def load_message_history(user_id: str, max_messages: int = 10) -> List[Dict[str, str]]:
-    messages_file = MEMORY_DIR / f"messages_{user_id}.jsonl"
-    
-    if not messages_file.exists():
-        return []
-    
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
     try:
-        messages = []
-        with open(messages_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            for line in lines:
-                line = line.strip()
-                if line:
-                    messages.append(json.loads(line))
+        data = await request.json()
         
-        return messages[-max_messages:] if len(messages) > max_messages else messages
-    except (json.JSONDecodeError, IOError) as e:
-        return []
+        if "message" in data and "text" in data.get("message", {}):
+            message = data["message"]
+            chat_id = str(message["chat"]["id"])
+            text = message["text"]
+            
+            await handle_telegram_update(request.app, chat_id, text, raw_payload=data)
+        
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Error processing Telegram webhook: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
+
+app.include_router(status_router)
+app.include_router(cursor_test_router, prefix="/cursor", tags=["cursor"])
+app.include_router(cursor_webhook_router)
 
 
-def save_messages(user_id: str, user_message: str, assistant_message: str) -> None:
-    messages_file = MEMORY_DIR / f"messages_{user_id}.jsonl"
-    
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with open(messages_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"role": "user", "content": user_message}, ensure_ascii=False) + "\n")
-            f.write(json.dumps({"role": "assistant", "content": assistant_message}, ensure_ascii=False) + "\n")
-    except IOError as e:
-        raise IOError(f"Failed to save messages: {e}")
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 
-def load_ai_contract() -> str:
-    """
-    Загружает текст AI-контракта из docs/ai_contract.md.
-    Если файл не найден, возвращает пустую строку.
-    """
-    docs_dir = Path(__file__).parent.parent / "docs"
-    contract_file = docs_dir / "ai_contract.md"
-    
-    if not contract_file.exists():
-        return ""
-    
-    try:
-        with open(contract_file, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            return content if content else ""
-    except IOError:
-        return ""
-
-
-def load_project_summary() -> str:
-    summary_file = MEMORY_DIR / "project_summary.md"
-    
-    if not summary_file.exists():
-        return ""
-    
-    try:
-        with open(summary_file, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            return content if content else ""
-    except IOError:
-        return ""
-
-
-def load_tasks() -> Dict:
-    tasks_file = MEMORY_DIR / "tasks.json"
-    
-    if not tasks_file.exists():
-        return {"tasks": []}
-    
-    try:
-        with open(tasks_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if not isinstance(data, dict) or "tasks" not in data:
-                return {"tasks": []}
-            return data
-    except (json.JSONDecodeError, IOError):
-        return {"tasks": []}
-
-
-def save_tasks(data: Dict) -> None:
-    tasks_file = MEMORY_DIR / "tasks.json"
-    
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with open(tasks_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except IOError as e:
-        raise IOError(f"Failed to save tasks: {e}")
-
-
-def load_recent_results(max_results: int = 10) -> List[Dict]:
-    data = load_commands()
-    results = data.get("results", [])
-    
-    return results[-max_results:] if len(results) > max_results else results
-
-
-def load_commands() -> Dict:
-    commands_file = MEMORY_DIR / "commands.json"
-    
-    if not commands_file.exists():
-        return {"commands": [], "results": []}
-    
-    try:
-        with open(commands_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if not isinstance(data, dict):
-                return {"commands": [], "results": []}
-            if "commands" not in data:
-                data["commands"] = []
-            if "results" not in data:
-                data["results"] = []
-            return data
-    except (json.JSONDecodeError, IOError):
-        return {"commands": [], "results": []}
-
-
-def save_commands(data: Dict) -> None:
-    commands_file = MEMORY_DIR / "commands.json"
-    
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        with open(commands_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except IOError as e:
-        raise IOError(f"Failed to save commands: {e}")
-
-
-def find_command_by_id(command_id: str) -> Optional[Dict]:
-    data = load_commands()
-    for cmd in data.get("commands", []):
-        if cmd.get("id") == command_id:
-            return cmd
-    return None
+def is_technical_task(message: str) -> bool:
+    """Проверяет, является ли сообщение техническим заданием для Cursor."""
+    message_lower = message.lower()
+    technical_keywords = [
+        "создай файл",
+        "добавь эндпоинт",
+        "измени код",
+        "создай router",
+        "создай модель",
+        "сформируй команду для cursor",
+        "create file",
+        "add endpoint",
+        "modify code",
+        "create router",
+        "create model",
+        "form command for cursor",
+    ]
+    return any(keyword in message_lower for keyword in technical_keywords)
 
 
 def add_command(task_id: Optional[str], command: Dict) -> str:
@@ -228,6 +144,7 @@ class CursorResultRequest(BaseModel):
     command_id: str
     status: str
     result: Dict
+    user_id: Optional[str] = None
 
 
 class CursorResultResponse(BaseModel):
@@ -244,14 +161,112 @@ class TaskUpdateRequest(BaseModel):
     status: str
 
 
+class DevAgentStartRequest(BaseModel):
+    task: str
+    auto_create_pr: bool = True
+    branch_name: Optional[str] = None
+
+
+class DevAgentStartResponse(BaseModel):
+    agent_id: str
+    status: str
+    url: Optional[str] = None
+    pr_url: Optional[str] = None
+    branch_name: Optional[str] = None
+
+
+class DevAgentStatusResponse(BaseModel):
+    id: str
+    status: str
+    url: Optional[str] = None
+    pr_url: Optional[str] = None
+    summary: Optional[str] = None
+
+
 @app.on_event("startup")
 async def startup_event():
-    load_config()
+    if os.getenv("TESTING") == "1":
+        logger.info("Starting FastAPI orchestrator in TESTING mode")
+        from orchestrator.dev_agent_store import DevAgentStore
+        
+        app.state.config = {"model": "gpt-4"}
+        app.state.openai_client = None
+        app.state.dev_agent_store = DevAgentStore()
+        app.state.handled_cursor_runs: Set[str] = set()
+        app.state.pending_cursor_commands: List[Dict] = []
+        
+        logger.info("FastAPI orchestrator started in TESTING mode successfully")
+        return
+    
+    logger.info("Starting FastAPI orchestrator")
+    logger.info(f"ENV: {BotConfig.ENV}")
+    logger.info(f"LOG_LEVEL: {BotConfig.LOG_LEVEL}")
+    
+    config_data = load_config()
+    
+    api_key = OpenAIConfig.API_KEY
+    if not api_key:
+        raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env file")
+    
+    openai_client_instance = openai.OpenAI(api_key=api_key)
+    
+    from orchestrator.dev_agent_store import DevAgentStore
+    
+    app.state.config = config_data
+    app.state.openai_client = openai_client_instance
+    app.state.dev_agent_store = DevAgentStore()
+    app.state.handled_cursor_runs: Set[str] = set()
+    app.state.pending_cursor_commands: List[Dict] = []
+    
+    logger.info("Configuration summary:")
+    logger.info(f"  OpenAI API key: {'PRESENT' if OpenAIConfig.API_KEY else 'MISSING'}")
+    logger.info(f"  Cursor API key: {'PRESENT' if CursorConfig.API_KEY else 'MISSING'}")
+    logger.info(f"  Cursor Repository: {'SET' if CursorConfig.REPOSITORY else 'NOT SET'}")
+    logger.info(f"  Cursor Webhook URL: {'SET' if CursorConfig.WEBHOOK_URL else 'NOT SET'}")
+    logger.info(f"  Telegram Bot Token: {'PRESENT' if TelegramConfig.TOKEN else 'MISSING'}")
+    
+    cursor_webhook_url = CursorConfig.WEBHOOK_URL
+    if cursor_webhook_url:
+        logger.info(f"  Cursor Webhook URL: {cursor_webhook_url[:50]}...")
+    
+    logger.info("FastAPI orchestrator started successfully")
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    if not openai_client:
+async def chat(chat_request: ChatRequest, request: Request):
+    app_state = request.app.state
+    message_preview = chat_request.message[:50] + "..." if len(chat_request.message) > 50 else chat_request.message
+    logger.info(f"Chat request: user_id={chat_request.user_id}, message_preview='{message_preview}'")
+    
+    if is_technical_task(chat_request.message):
+        logger.info("Technical task detected, creating Cursor command", extra={"user_id": chat_request.user_id})
+        command_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc).isoformat()
+        
+        command_entry = {
+            "id": command_id,
+            "timestamp": timestamp,
+            "prompt": chat_request.message,
+            "user_id": chat_request.user_id
+        }
+        
+        data = load_commands()
+        data["commands"].append(command_entry)
+        save_commands(data)
+        
+        app_state.pending_cursor_commands.append(command_entry)
+        logger.info(
+            "Command added to queue and saved to commands.json",
+            extra={
+                "command_id": command_id,
+                "queue_size": len(app_state.pending_cursor_commands),
+            }
+        )
+        
+        return ChatResponse(reply="Задача отправлена Cursor, ждем результата…")
+    
+    if not app_state.openai_client:
+        logger.error("OpenAI client not initialized")
         raise HTTPException(status_code=500, detail="OpenAI client not initialized")
     
     try:
@@ -370,18 +385,18 @@ async def chat(request: ChatRequest):
         
         system_content = "\n".join(system_parts)
         
-        history = load_message_history(request.user_id)
+        history = load_message_history(chat_request.user_id)
         
         messages = [
             {"role": "system", "content": system_content}
         ]
         
         messages.extend(history)
-        messages.append({"role": "user", "content": request.message})
+        messages.append({"role": "user", "content": chat_request.message})
         
-        model = config.get("model", "gpt-4")
+        model = app_state.config.get("model", "gpt-4")
         
-        response = openai_client.chat.completions.create(
+        response = app_state.openai_client.chat.completions.create(
             model=model,
             messages=messages
         )
@@ -395,7 +410,7 @@ async def chat(request: ChatRequest):
                 
                 if response_type == "reply_user":
                     user_message = data.get("message", "")
-                    save_messages(request.user_id, request.message, assistant_reply)
+                    save_messages(chat_request.user_id, chat_request.message, assistant_reply)
                     return ChatResponse(reply=user_message)
                 
                 elif response_type == "call_cursor":
@@ -406,7 +421,17 @@ async def chat(request: ChatRequest):
                         raise ValueError("Command must be a dictionary")
                     
                     command_id = add_command(task_id, command)
-                    save_messages(request.user_id, request.message, assistant_reply)
+                    prompt_preview = command.get("prompt", "")[:100] + "..." if len(command.get("prompt", "")) > 100 else command.get("prompt", "")
+                    logger.info(
+                        "Cursor command created",
+                        extra={
+                            "command_id": command_id,
+                            "task_id": task_id,
+                            "user_id": chat_request.user_id,
+                            "prompt_preview": prompt_preview,
+                        }
+                    )
+                    save_messages(chat_request.user_id, chat_request.message, assistant_reply)
                     
                     return ChatResponse(
                         reply="Я сформировал команду для Cursor и отправил её на выполнение.",
@@ -414,16 +439,19 @@ async def chat(request: ChatRequest):
                     )
         
         except (json.JSONDecodeError, ValueError, KeyError, TypeError):
-            pass
+            logger.debug(f"Failed to parse assistant reply as JSON, treating as plain text")
         
-        save_messages(request.user_id, request.message, assistant_reply)
+        save_messages(chat_request.user_id, chat_request.message, assistant_reply)
         return ChatResponse(reply=assistant_reply)
     
     except openai.OpenAIError as e:
+        logger.error(f"OpenAI API error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"OpenAI API error: {str(e)}")
     except IOError as e:
+        logger.error(f"File operation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"File operation error: {str(e)}")
     except Exception as e:
+        logger.error(f"Unexpected error in /chat: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
@@ -440,57 +468,138 @@ async def receive_command(request: CommandRequest):
 
 
 @app.get("/for-cursor/commands")
-async def get_pending_commands():
+async def get_pending_commands(request: Request):
     try:
-        data = load_commands()
-        pending_commands = [
+        app_state = request.app.state
+        commands_to_return = app_state.pending_cursor_commands.copy()
+        app_state.pending_cursor_commands.clear()
+        
+        if commands_to_return:
+            command_ids = [cmd["id"] for cmd in commands_to_return]
+            logger.info(f"Cursor commands requested: {len(commands_to_return)} commands returned and cleared, ids={command_ids}")
+        else:
+            logger.debug("Cursor commands requested: queue is empty")
+        
+        formatted_commands = [
             {
                 "id": cmd["id"],
-                "task_id": cmd["task_id"],
-                "command": cmd["command"]
+                "prompt": cmd["prompt"],
+                "user_id": cmd["user_id"],
+                "timestamp": cmd["timestamp"]
             }
-            for cmd in data.get("commands", [])
-            if cmd.get("status") == "pending"
+            for cmd in commands_to_return
         ]
         
-        return {"commands": pending_commands}
+        return {"commands": formatted_commands}
     
     except Exception as e:
+        logger.error(f"Error getting pending commands: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @app.post("/from-cursor/result", response_model=CursorResultResponse)
-async def receive_result(request: CursorResultRequest):
+async def receive_result(cursor_result: CursorResultRequest, request: Request):
     try:
-        data = load_commands()
-        
         command_found = None
-        for cmd in data["commands"]:
-            if cmd.get("id") == request.command_id:
-                cmd["status"] = request.status
+        user_id = None
+        
+        data = load_commands()
+        for cmd in data.get("commands", []):
+            if cmd.get("id") == cursor_result.command_id:
                 command_found = cmd
+                user_id = cmd.get("user_id")
                 break
         
         if not command_found:
-            raise HTTPException(status_code=404, detail=f"Command {request.command_id} not found")
+            app_state = request.app.state
+            for cmd in app_state.pending_cursor_commands:
+                if cmd.get("id") == cursor_result.command_id:
+                    command_found = cmd
+                    user_id = cmd.get("user_id")
+                    break
         
-        result_entry = {
-            "command_id": request.command_id,
-            "task_id": command_found["task_id"],
-            "status": request.status,
-            "result": request.result
-        }
+        if not command_found:
+            logger.warning(
+                "Cursor result received for unknown command_id",
+                extra={"command_id": cursor_result.command_id}
+            )
         
-        data["results"].append(result_entry)
-        save_commands(data)
+        if user_id is None:
+            user_id = cursor_result.user_id
+        
+        if user_id is None and isinstance(cursor_result.result, dict):
+            user_id = cursor_result.result.get("user_id")
+        
+        logger.info(
+            "Cursor result received",
+            extra={
+                "command_id": cursor_result.command_id,
+                "status": cursor_result.status,
+                "user_id": user_id,
+            }
+        )
+        
+        result_text = "✅ Cursor выполнил задачу\n\n"
+        
+        if cursor_result.status == "error":
+            error_msg = cursor_result.result.get("error", "Unknown error") if isinstance(cursor_result.result, dict) else "Unknown error"
+            logger.error(
+                "Cursor command failed",
+                extra={"command_id": cursor_result.command_id, "error": error_msg}
+            )
+            result_text = f"❌ Cursor выполнил задачу с ошибкой\n\nОшибка: {error_msg}\n\n"
+        else:
+            diff = cursor_result.result.get("diff", "") if isinstance(cursor_result.result, dict) else ""
+            notes = cursor_result.result.get("notes", "") if isinstance(cursor_result.result, dict) else ""
+            message = cursor_result.result.get("message", "") if isinstance(cursor_result.result, dict) else ""
+            
+            if message:
+                result_text += f"{message}\n\n"
+            
+            if notes:
+                result_text += f"Комментарии: {notes}\n\n"
+            
+            if diff:
+                result_text += f"```\n{diff}\n```"
+        
+        if user_id:
+            success = await send_telegram_message(user_id, result_text)
+            if success:
+                logger.info("Result sent to Telegram", extra={"user_id": user_id})
+            else:
+                logger.warning("Failed to send result to Telegram", extra={"user_id": user_id})
+        else:
+            logger.info("No user_id found, result logged but not sent to Telegram")
+        
+        if command_found:
+            data = load_commands()
+            result_entry = {
+                "command_id": cursor_result.command_id,
+                "task_id": command_found.get("task_id", ""),
+                "status": cursor_result.status,
+                "result": cursor_result.result
+            }
+            
+            data["results"].append(result_entry)
+            save_commands(data)
         
         return CursorResultResponse(ok=True)
     
     except HTTPException:
         raise
     except IOError as e:
+        logger.error(
+            "File operation error when saving cursor result",
+            extra={"error": str(e)},
+            exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"File operation error: {str(e)}")
     except Exception as e:
+        logger.error(
+            "Unexpected error when processing cursor result",
+            extra={"error": str(e)},
+            exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
@@ -594,6 +703,74 @@ async def update_task(request: TaskUpdateRequest):
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
+@app.post("/dev/agents", response_model=DevAgentStartResponse)
+async def create_dev_agent(request: DevAgentStartRequest):
+    try:
+        result = await create_cursor_agent(
+            task_text=request.task,
+            auto_create_pr=request.auto_create_pr,
+            branch_name=request.branch_name,
+        )
+        return DevAgentStartResponse(
+            agent_id=result.id,
+            status=result.status,
+            url=result.url,
+            pr_url=result.pr_url,
+            branch_name=result.branch_name,
+        )
+    except ValueError as e:
+        logger.error(f"Configuration error in create_dev_agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    except RuntimeError as e:
+        error_str = str(e)
+        status_code = getattr(e, "status_code", None)
+        response_text = getattr(e, "response_text", None)
+        
+        if status_code:
+            detail = response_text or error_str.split(": ", 1)[1] if ": " in error_str else error_str
+            logger.error(f"HTTP error in create_dev_agent: {error_str}", exc_info=True)
+            raise HTTPException(status_code=status_code, detail=detail)
+        
+        logger.error(f"Runtime error in create_dev_agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create Cursor agent: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in create_dev_agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@app.get("/dev/agents/{agent_id}", response_model=DevAgentStatusResponse)
+async def get_dev_agent_status(agent_id: str):
+    try:
+        status_data = await get_cursor_agent_status(agent_id)
+        
+        return DevAgentStatusResponse(
+            id=status_data.get("id", agent_id),
+            status=status_data.get("status", "unknown"),
+            url=status_data.get("url"),
+            pr_url=status_data.get("pr_url"),
+            summary=status_data.get("summary"),
+        )
+    except ValueError as e:
+        logger.error(f"Configuration error in get_dev_agent_status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    except RuntimeError as e:
+        error_str = str(e)
+        status_code = getattr(e, "status_code", None)
+        response_text = getattr(e, "response_text", None)
+        
+        if status_code:
+            detail = response_text or error_str.split(": ", 1)[1] if ": " in error_str else error_str
+            logger.error(f"HTTP error in get_dev_agent_status: {error_str}", exc_info=True)
+            raise HTTPException(status_code=status_code, detail=detail)
+        
+        logger.error(f"Runtime error in get_dev_agent_status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get Cursor agent status: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in get_dev_agent_status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+

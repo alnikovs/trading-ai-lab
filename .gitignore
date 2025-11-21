@@ -11,3 +11,9 @@ memory/
 .env
 .env.local
 *.local.yaml
+
+.venv/
+
+__pycache__/
+orchestrator/__pycache__/
+*.pyc
