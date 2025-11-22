@@ -40,11 +40,23 @@ class SimpleMovingAverageStrategy(Strategy):
             return None
         return sum(values) / len(values)
 
-    def on_market_state(
+    def generate_signal(
         self,
         market_state: MarketState,
         position: Optional[PositionState],
     ) -> Optional[TradeSignal]:
+        """
+        Генерирует торговый сигнал на основе пересечения короткого и длинного
+        окон скользящей средней для текущего символа.
+
+        Args:
+            market_state: Актуальный снимок рынка с ценой и таймстемпом.
+            position: Текущее состояние позиции по символу, если оно существует.
+
+        Returns:
+            TradeSignal, когда пересечение МА даёт уверенность выше порога,
+            иначе None.
+        """
         price = market_state.price
         self._short_prices.append(price)
         self._long_prices.append(price)
@@ -87,3 +99,10 @@ class SimpleMovingAverageStrategy(Strategy):
                 "long_ma": long_ma,
             },
         )
+
+    def on_market_state(
+        self,
+        market_state: MarketState,
+        position: Optional[PositionState],
+    ) -> Optional[TradeSignal]:
+        return self.generate_signal(market_state, position)
