@@ -18,16 +18,26 @@ class Strategy(ABC):
         self.symbol = symbol
 
     @abstractmethod
-    def on_market_state(
+    def generate_signal(
         self,
         market_state: MarketState,
         position: Optional[PositionState],
     ) -> Optional[TradeSignal]:
         """
-        Основной метод стратегии.
+        Построить торговый сигнал по текущему состоянию рынка и позиции.
 
         :param market_state: снимок текущего рынка
         :param position: текущее состояние позиции по символу (если есть)
         :return: TradeSignal или None
         """
         raise NotImplementedError
+
+    def on_market_state(
+        self,
+        market_state: MarketState,
+        position: Optional[PositionState],
+    ) -> Optional[TradeSignal]:
+        """
+        Обёртка для обратной совместимости, перенаправляющая вызов в generate_signal.
+        """
+        return self.generate_signal(market_state=market_state, position=position)

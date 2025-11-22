@@ -73,7 +73,7 @@ class TraderAgentL1:
             if strategy.symbol != symbol:
                 # стратегия работает по своему символу — можно позже сделать мультисимвольные
                 continue
-            signal = strategy.on_market_state(market_state, position)
+            signal = strategy.generate_signal(market_state, position)
             if signal is not None:
                 raw_signals.append(signal)
 

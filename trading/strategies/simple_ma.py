@@ -22,6 +22,15 @@ class SimpleMovingAverageStrategy(Strategy):
         long_window: int = 30,
         min_confidence: float = 0.6,
     ) -> None:
+        """
+        Инициализировать стратегию скользящих средних.
+
+        :param strategy_id: идентификатор стратегии (для логов и сигналов)
+        :param symbol: торговый инструмент
+        :param short_window: размер короткого окна SMA
+        :param long_window: размер длинного окна SMA
+        :param min_confidence: минимальная "уверенность" для генерации сигнала
+        """
         super().__init__(strategy_id=strategy_id, symbol=symbol)
         if short_window <= 0 or long_window <= 0:
             raise ValueError("windows must be > 0")
@@ -40,11 +49,18 @@ class SimpleMovingAverageStrategy(Strategy):
             return None
         return sum(values) / len(values)
 
-    def on_market_state(
+    def generate_signal(
         self,
         market_state: MarketState,
         position: Optional[PositionState],
     ) -> Optional[TradeSignal]:
+        """
+        Построить торговый сигнал на основании пересечения краткой и длинной SMA.
+
+        :param market_state: актуальное состояние рынка
+        :param position: состояние позиции по символу (не используется на данном уровне)
+        :return: TradeSignal или None, если условий для сделки нет
+        """
         price = market_state.price
         self._short_prices.append(price)
         self._long_prices.append(price)
@@ -74,16 +90,32 @@ class SimpleMovingAverageStrategy(Strategy):
         # размер позиции сейчас жёстко задаём, позже это возьмёт на себя risk engine
         size = 1.0
 
+        timestamp = (
+            market_state.timestamp
+            if isinstance(market_state.timestamp, datetime)
+            else datetime.utcnow()
+        )
+
         return TradeSignal(
             symbol=self.symbol,
             side=side,
             size=size,
             confidence=confidence,
             strategy_id=self.strategy_id,
-            timestamp=market_state.timestamp if isinstance(market_state.timestamp, datetime) else datetime.utcnow(),
+            timestamp=timestamp,
             price_hint=price,
             meta={
                 "short_ma": short_ma,
                 "long_ma": long_ma,
             },
         )
+
+    def on_market_state(
+        self,
+        market_state: MarketState,
+        position: Optional[PositionState],
+    ) -> Optional[TradeSignal]:
+        """
+        Поддержка старого интерфейса Strategy; перенаправляет в generate_signal.
+        """
+        return self.generate_signal(market_state=market_state, position=position)
