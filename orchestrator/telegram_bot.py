@@ -253,9 +253,9 @@ async def handle_telegram_update(
         # Создаём агента для шага 1
         agent_id = await create_devflow_step_agent(
             chat_id=session.chat_id,
-            flow_type=session.flow_type,
-            step_index=session.current_step_index,
-            task_description=step_prompt,
+            flow_id=session.flow_id,
+            step=session.current_step_index + 1,
+            step_prompt=step_prompt,
         )
         session.on_step_agent_created(agent_id)
         DevFlowStore.save_session(session)
@@ -303,9 +303,9 @@ async def handle_telegram_update(
                 # Создаём агента для следующего шага
                 agent_id = await create_devflow_step_agent(
                     chat_id=session.chat_id,
-                    flow_type=session.flow_type,
-                    step_index=session.current_step_index,
-                    task_description=step_prompt,
+                    flow_id=session.flow_id,
+                    step=session.current_step_index + 1,
+                    step_prompt=step_prompt,
                 )
                 session.on_step_agent_created(agent_id)
                 DevFlowStore.save_session(session)
