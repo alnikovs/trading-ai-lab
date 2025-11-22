@@ -17,3 +17,8 @@ memory/
 __pycache__/
 orchestrator/__pycache__/
 *.pyc
+
+
+backup/
+backups/
+logs/

@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel
 
 from orchestrator.config import CursorConfig
+from orchestrator.prompts import BUILDER_LLM_SYSTEM_PROMPT
 
 logger = logging.getLogger("orchestrator.cursor_client")
 
@@ -36,9 +37,12 @@ async def create_cursor_agent(
 
     url = f"{base_url}/v0/agents"
 
+    # Объединяем системный промпт builder-агента с задачей пользователя
+    full_prompt = f"{BUILDER_LLM_SYSTEM_PROMPT}\n\n---\n\nTASK: {task_text}"
+
     payload: dict = {
         "prompt": {
-            "text": task_text,
+            "text": full_prompt,
         },
         "source": {
             "repository": repository,
