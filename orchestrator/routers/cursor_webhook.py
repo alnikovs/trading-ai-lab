@@ -2,10 +2,11 @@ import json
 import logging
 from typing import Set
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request
 
 from orchestrator.llm_router import IncomingMessage, handle_message
 from orchestrator.telegram_bot import send_telegram_message
+from orchestrator.dev_flow import DevFlowState, build_step_completed_message
 
 logger = logging.getLogger("orchestrator.cursor_webhook")
 
@@ -61,11 +62,53 @@ async def cursor_webhook(request: Request):
         
         store = app_state.dev_agent_store
         record = store.get(agent_id) if agent_id else None
-        chat_id = record.chat_id if record else None
         
         if agent_id and not record:
             logger.warning(f"Received Cursor webhook for unknown agent_id: {agent_id}")
+            # Fallback на старое поведение для неизвестных агентов
+            chat_id = None
+        else:
+            chat_id = record.chat_id if record else None
+            
+            # Проверяем, это DevFlow-агент?
+            if record and record.is_devflow:
+                logger.info(
+                    "DevFlow: webhook received for DevFlow agent_id=%s flow_type=%s step_index=%s chat_id=%s",
+                    agent_id, record.flow_type, record.step_index, chat_id
+                )
+                
+                # Получаем DevFlowStore из app.state
+                dev_flow_store = app_state.dev_flow_store
+                session = dev_flow_store.get_session(chat_id) if chat_id else None
+                
+                if not session:
+                    logger.error(
+                        f"DevFlow: session not found for chat_id={chat_id}, flow_type={record.flow_type}, "
+                        f"falling back to generic notification"
+                    )
+                    # Fallback на старое поведение
+                else:
+                    # Обрабатываем завершение шага DevFlow
+                    summary_text = summary or "Задача выполнена"
+                    
+                    # Формируем красивое сообщение
+                    message = build_step_completed_message(session, summary_text)
+                    
+                    # Отправляем в Telegram
+                    await send_telegram_message(chat_id, message)
+                    
+                    # Обновляем состояние сессии
+                    session.on_step_completed(summary_text)
+                    dev_flow_store.save_session(session)
+                    
+                    logger.info(
+                        "DevFlow: step %s/%s completed for chat_id=%s",
+                        session.current_step_index + 1, session.total_steps, session.chat_id
+                    )
+                    
+                    return {"ok": True}
         
+        # Старое поведение для обычных Dev Agents
         incoming = IncomingMessage(
             source="cursor",
             chat_id=chat_id,
@@ -117,4 +160,3 @@ async def cursor_webhook(request: Request):
     except Exception:
         logger.exception("Error while handling Cursor webhook business logic")
         return {"ok": False, "error": "internal_error"}
-

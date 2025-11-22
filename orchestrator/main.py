@@ -187,11 +187,13 @@ class DevAgentStatusResponse(BaseModel):
 async def startup_event():
     if os.getenv("TESTING") == "1":
         logger.info("Starting FastAPI orchestrator in TESTING mode")
-        from orchestrator.dev_agent_store import DevAgentStore
+        from orchestrator.dev_agent_store import get_dev_agent_store
+        from orchestrator.dev_flow import DevFlowStore
         
         app.state.config = {"model": "gpt-4"}
         app.state.openai_client = None
-        app.state.dev_agent_store = DevAgentStore()
+        app.state.dev_agent_store = get_dev_agent_store()
+        app.state.dev_flow_store = DevFlowStore
         app.state.handled_cursor_runs: Set[str] = set()
         app.state.pending_cursor_commands: List[Dict] = []
         
@@ -210,11 +212,13 @@ async def startup_event():
     
     openai_client_instance = openai.OpenAI(api_key=api_key)
     
-    from orchestrator.dev_agent_store import DevAgentStore
+    from orchestrator.dev_agent_store import get_dev_agent_store
+    from orchestrator.dev_flow import DevFlowStore
     
     app.state.config = config_data
     app.state.openai_client = openai_client_instance
-    app.state.dev_agent_store = DevAgentStore()
+    app.state.dev_agent_store = get_dev_agent_store()
+    app.state.dev_flow_store = DevFlowStore
     app.state.handled_cursor_runs: Set[str] = set()
     app.state.pending_cursor_commands: List[Dict] = []
     

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from orchestrator.config import CursorConfig
 from orchestrator.prompts import BUILDER_LLM_SYSTEM_PROMPT
+from orchestrator.dev_agent_store import get_dev_agent_store
 
 logger = logging.getLogger("orchestrator.cursor_client")
 
@@ -61,10 +62,10 @@ async def create_cursor_agent(
         if not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://")):
             raise ValueError(f"Invalid CURSOR_WEBHOOK_URL format: {webhook_url}. Must be a valid HTTP(S) URL.")
         payload["webhook"] = {"url": webhook_url}
-    
+
     payload_preview_str = json.dumps(payload, default=str, indent=None)
     payload_preview = payload_preview_str[:200] + "..." if len(payload_preview_str) > 200 else payload_preview_str
-    
+
     logger.info(
         "Creating Cursor agent",
         extra={
@@ -74,7 +75,7 @@ async def create_cursor_agent(
             "branch": branch_name or "default",
             "webhook_attached": bool(webhook_url),
             "payload_preview": payload_preview[:200],
-        }
+        },
     )
 
     try:
@@ -93,7 +94,7 @@ async def create_cursor_agent(
                 pr_url=data.get("pr_url"),
                 branch_name=data.get("branch_name") or branch_name,
             )
-            
+
             logger.info(
                 "Cursor agent created: id=%s, status=%s, url=%s, pr_url=%s, branch=%s",
                 agent_id,
@@ -116,7 +117,7 @@ async def create_cursor_agent(
                 "response_preview": response_preview,
                 "payload_preview": payload_preview,
             },
-            exc_info=True
+            exc_info=True,
         )
         http_error = RuntimeError(error_text)
         http_error.status_code = e.response.status_code
@@ -130,9 +131,65 @@ async def create_cursor_agent(
                 "error": str(e),
                 "payload_preview": payload_preview,
             },
-            exc_info=True
+            exc_info=True,
         )
         raise RuntimeError(f"Request failed: {str(e)}") from e
+
+
+async def create_devflow_step_agent(
+    chat_id: str,
+    flow_type: str,
+    step_index: int,
+    task_description: str,
+) -> str:
+    """
+    Создаёт Cursor-агента для конкретного шага DevFlow.
+    
+    Args:
+        chat_id: ID чата Telegram
+        flow_type: Тип DevFlow (например, "simple_ma")
+        step_index: Индекс шага (0-based)
+        task_description: Текст задачи для этого шага
+    
+    Returns:
+        agent_id: ID созданного Cursor агента
+    """
+    logger.info(
+        "DevFlow: creating Cursor agent for flow=%s step=%s (chat_id=%s)",
+        flow_type, step_index + 1, chat_id
+    )
+    
+    # Формируем понятное имя для агента
+    agent_name = f"DevFlow {flow_type} step {step_index + 1}"
+    
+    # Формируем полное задание
+    full_task_text = f"{agent_name}\n\n{task_description}"
+    
+    # Создаём агента
+    result = await create_cursor_agent(
+        task_text=full_task_text,
+        auto_create_pr=(step_index >= 1),  # PR создаём начиная со 2-го шага
+        branch_name=f"devflow-{flow_type}-step{step_index + 1}" if step_index == 0 else None,
+    )
+    
+    # Регистрируем в DevAgentStore с флагами DevFlow
+    store = get_dev_agent_store()
+    store.register(
+        agent_id=result.id,
+        chat_id=chat_id,
+        original_text=f"/devflow_{flow_type}",
+        dev_task=task_description,
+        is_devflow=True,
+        flow_type=flow_type,
+        step_index=step_index,
+    )
+    
+    logger.info(
+        "DevFlow: registered agent_id=%s for flow=%s step=%s chat_id=%s",
+        result.id, flow_type, step_index + 1, chat_id
+    )
+    
+    return result.id
 
 
 async def get_cursor_agent_status(agent_id: str) -> dict:
@@ -143,7 +200,7 @@ async def get_cursor_agent_status(agent_id: str) -> dict:
         raise ValueError("CURSOR_API_KEY not configured in .env")
 
     url = f"{base_url}/v0/agents/{agent_id}"
-    
+
     logger.debug("Getting Cursor agent status", extra={"agent_id": agent_id, "url": url})
 
     try:
@@ -151,15 +208,15 @@ async def get_cursor_agent_status(agent_id: str) -> dict:
             response = await client.get(url)
             response.raise_for_status()
             data = response.json()
-            
+
             logger.debug(
                 "Cursor agent status retrieved",
                 extra={
                     "agent_id": agent_id,
                     "status": data.get("status", "unknown"),
-                }
+                },
             )
-            
+
             return data
 
     except httpx.HTTPStatusError as e:
@@ -173,7 +230,7 @@ async def get_cursor_agent_status(agent_id: str) -> dict:
                 "status_code": e.response.status_code,
                 "response_preview": response_preview,
             },
-            exc_info=True
+            exc_info=True,
         )
         http_error = RuntimeError(error_text)
         http_error.status_code = e.response.status_code
@@ -187,6 +244,48 @@ async def get_cursor_agent_status(agent_id: str) -> dict:
                 "url": url,
                 "error": str(e),
             },
-            exc_info=True
+            exc_info=True,
         )
         raise RuntimeError(f"Request failed: {str(e)}") from e
+
+
+async def create_devflow_step_agent(
+    chat_id: str,
+    flow_id: str,
+    step: int,
+    step_prompt: str,
+) -> str:
+    """Создать Cursor-агента для конкретного шага DevFlow и привязать его к DevAgentStore.
+    Возвращает agent_id (строка).
+    """
+    # Оборачиваем шаг DevFlow в задачу для Cursor
+    task_text = (
+        f"[DevFlow simple_ma | flow_id={flow_id} | step={step}]\n\n"
+        f"{step_prompt}"
+    )
+
+    result = await create_cursor_agent(task_text=task_text, auto_create_pr=True)
+
+    # Регистрируем агента в DevAgentStore, чтобы cursor_webhook мог найти chat_id
+    store = get_dev_agent_store()
+    try:
+        store.register(
+            agent_id=result.id,
+            chat_id=chat_id,
+            original_text=f"DevFlow simple_ma flow_id={flow_id} step={step}",
+            dev_task=step_prompt,
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to register DevFlow agent in DevAgentStore",
+            extra={
+                "agent_id": result.id,
+                "chat_id": chat_id,
+                "flow_id": flow_id,
+                "step": step,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
+
+    return result.id

@@ -14,6 +14,10 @@ class DevAgentRecord:
     original_text: str
     dev_task: Optional[str] = None
     created_at: float = field(default_factory=time.time)
+    # DevFlow fields
+    is_devflow: bool = False
+    flow_type: Optional[str] = None
+    step_index: Optional[int] = None
 
 
 class DevAgentStore:
@@ -27,6 +31,9 @@ class DevAgentStore:
         chat_id: str,
         original_text: str,
         dev_task: Optional[str] = None,
+        is_devflow: bool = False,
+        flow_type: Optional[str] = None,
+        step_index: Optional[int] = None,
     ) -> None:
         with self._lock:
             self._by_agent_id[agent_id] = DevAgentRecord(
@@ -34,6 +41,9 @@ class DevAgentStore:
                 chat_id=chat_id,
                 original_text=original_text,
                 dev_task=dev_task,
+                is_devflow=is_devflow,
+                flow_type=flow_type,
+                step_index=step_index,
             )
 
     def get(self, agent_id: str) -> Optional[DevAgentRecord]:
