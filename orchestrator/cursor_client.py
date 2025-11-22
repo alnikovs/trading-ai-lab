@@ -136,62 +136,6 @@ async def create_cursor_agent(
         raise RuntimeError(f"Request failed: {str(e)}") from e
 
 
-async def create_devflow_step_agent(
-    chat_id: str,
-    flow_type: str,
-    step_index: int,
-    task_description: str,
-) -> str:
-    """
-    Создаёт Cursor-агента для конкретного шага DevFlow.
-    
-    Args:
-        chat_id: ID чата Telegram
-        flow_type: Тип DevFlow (например, "simple_ma")
-        step_index: Индекс шага (0-based)
-        task_description: Текст задачи для этого шага
-    
-    Returns:
-        agent_id: ID созданного Cursor агента
-    """
-    logger.info(
-        "DevFlow: creating Cursor agent for flow=%s step=%s (chat_id=%s)",
-        flow_type, step_index + 1, chat_id
-    )
-    
-    # Формируем понятное имя для агента
-    agent_name = f"DevFlow {flow_type} step {step_index + 1}"
-    
-    # Формируем полное задание
-    full_task_text = f"{agent_name}\n\n{task_description}"
-    
-    # Создаём агента
-    result = await create_cursor_agent(
-        task_text=full_task_text,
-        auto_create_pr=(step_index >= 1),  # PR создаём начиная со 2-го шага
-        branch_name=f"devflow-{flow_type}-step{step_index + 1}" if step_index == 0 else None,
-    )
-    
-    # Регистрируем в DevAgentStore с флагами DevFlow
-    store = get_dev_agent_store()
-    store.register(
-        agent_id=result.id,
-        chat_id=chat_id,
-        original_text=f"/devflow_{flow_type}",
-        dev_task=task_description,
-        is_devflow=True,
-        flow_type=flow_type,
-        step_index=step_index,
-    )
-    
-    logger.info(
-        "DevFlow: registered agent_id=%s for flow=%s step=%s chat_id=%s",
-        result.id, flow_type, step_index + 1, chat_id
-    )
-    
-    return result.id
-
-
 async def get_cursor_agent_status(agent_id: str) -> dict:
     api_key = CursorConfig.API_KEY
     base_url = CursorConfig.BASE_URL
@@ -257,7 +201,21 @@ async def create_devflow_step_agent(
 ) -> str:
     """Создать Cursor-агента для конкретного шага DevFlow и привязать его к DevAgentStore.
     Возвращает agent_id (строка).
+    
+    Args:
+        chat_id: ID чата Telegram
+        flow_id: ID DevFlow сессии
+        step: Номер шага (1-based)
+        step_prompt: Текст задачи для этого шага
+    
+    Returns:
+        agent_id: ID созданного Cursor агента
     """
+    logger.info(
+        "DevFlow: creating Cursor agent for flow_id=%s step=%s (chat_id=%s)",
+        flow_id, step, chat_id
+    )
+    
     # Оборачиваем шаг DevFlow в задачу для Cursor
     task_text = (
         f"[DevFlow simple_ma | flow_id={flow_id} | step={step}]\n\n"
@@ -266,7 +224,7 @@ async def create_devflow_step_agent(
 
     result = await create_cursor_agent(task_text=task_text, auto_create_pr=True)
 
-    # Регистрируем агента в DevAgentStore, чтобы cursor_webhook мог найти chat_id
+    # Регистрируем агента в DevAgentStore с флагами DevFlow
     store = get_dev_agent_store()
     try:
         store.register(
@@ -274,6 +232,13 @@ async def create_devflow_step_agent(
             chat_id=chat_id,
             original_text=f"DevFlow simple_ma flow_id={flow_id} step={step}",
             dev_task=step_prompt,
+            is_devflow=True,
+            flow_type="simple_ma",
+            step_index=step - 1,  # step приходит 1-based, step_index должен быть 0-based
+        )
+        logger.info(
+            "DevFlow: registered agent_id=%s for flow_id=%s step=%s chat_id=%s",
+            result.id, flow_id, step, chat_id
         )
     except Exception as e:
         logger.error(

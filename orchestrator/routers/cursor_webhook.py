@@ -82,11 +82,11 @@ async def cursor_webhook(request: Request):
                 session = dev_flow_store.get_session(chat_id) if chat_id else None
                 
                 if not session:
-                    logger.error(
+                    logger.warning(
                         f"DevFlow: session not found for chat_id={chat_id}, flow_type={record.flow_type}, "
                         f"falling back to generic notification"
                     )
-                    # Fallback на старое поведение
+                    # Fallback на старое поведение - продолжим ниже
                 else:
                     # Обрабатываем завершение шага DevFlow
                     summary_text = summary or "Задача выполнена"
@@ -102,13 +102,13 @@ async def cursor_webhook(request: Request):
                     dev_flow_store.save_session(session)
                     
                     logger.info(
-                        "DevFlow: step %s/%s completed for chat_id=%s",
+                        "DevFlow: step %s/%s completed for chat_id=%s; sent step completion message",
                         session.current_step_index + 1, session.total_steps, session.chat_id
                     )
                     
                     return {"ok": True}
         
-        # Старое поведение для обычных Dev Agents
+        # Старое поведение для обычных Dev Agents (если record отсутствует, или record.is_devflow == False)
         incoming = IncomingMessage(
             source="cursor",
             chat_id=chat_id,
