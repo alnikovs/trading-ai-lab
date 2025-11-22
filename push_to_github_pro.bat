@@ -1,156 +1,119 @@
 @echo off
-TITLE Push Local Changes to GitHub (PRO)
+TITLE Push Local Changes to GitHub (SAFE - Never closes)
 
 echo ==========================================
-echo   Push Local Changes to GitHub (PRO)
-echo   Project: AI Quant Fund
+echo   Push Local Changes to GitHub (SAFE MODE)
 echo ==========================================
 echo.
 
-REM Переходим в папку проекта
+REM Prevent auto-close on any exit
+setlocal EnableExtensions
+
+REM Go to project folder
 cd /d C:\Bot\trading-ai-lab
 
-REM Проверяем, что это git-репозиторий
+echo Checking Git repository...
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo Ошибка: это не git-репозиторий.
-    echo Проверь путь C:\Bot\trading-ai-lab
     echo.
-    pause
-    exit /b 1
+    echo ERROR: This folder is NOT a Git repository.
+    echo Path checked: C:\Bot\trading-ai-lab
+    echo.
+    goto END
 )
 
-echo Текущий статус репозитория:
+echo.
+echo Current repo status:
 echo ------------------------------------------
 git status
 echo ------------------------------------------
 echo.
 
-REM Показываем текущую ветку
 for /f "delims=" %%B in ('git rev-parse --abbrev-ref HEAD') do set CURRENT_BRANCH=%%B
-echo Текущая ветка: %CURRENT_BRANCH%
+echo Current branch: %CURRENT_BRANCH%
 echo.
 
-echo Выберите режим:
-echo   1 ^) Commit + push в текущую ветку (%CURRENT_BRANCH%)
-echo   2 ^) Создать новую ветку и push туда (для PR)
+echo Choose mode:
+echo   1 ) Commit + push to current branch (%CURRENT_BRANCH%)
+echo   2 ) Create a new branch and push it (PR flow)
 echo.
 
-set /p mode=Введите номер режима (1 или 2) и нажмите Enter: 
+set /p mode=Enter mode number (1 or 2): 
 
-if "%mode%"=="2" goto create_branch
-if "%mode%"=="1" goto same_branch
+if "%mode%"=="2" goto CREATE_BRANCH
+if "%mode%"=="1" goto SAME_BRANCH
 
-echo Неверный выбор. По умолчанию: режим 1 (текущая ветка).
-goto same_branch
+echo Invalid choice. Using option 1 by default.
+goto SAME_BRANCH
 
 
-:ask_commit_msg
+:SAME_BRANCH
 echo.
-set /p commitmsg=Введите сообщение коммита (или оставьте пустым для авто): 
+echo Mode: commit + push to %CURRENT_BRANCH%
+goto ASK_COMMIT
 
-if "%commitmsg%"=="" (
-    echo Сообщение не задано, генерирую авто-коммит...
-    for /f "tokens=1-4 delims=.:-/ " %%a in ("%date% %time%") do (
-        set YY=%%d
-        set MM=%%b
-        set DD=%%c
-        set HH=%%e
-        set MI=%%f
-    )
-    set commitmsg=Auto: update %YY%-%MM%-%DD% %HH%:%MI%
-)
 
+:CREATE_BRANCH
 echo.
-echo Используется сообщение коммита:
-echo   "%commitmsg%"
-echo.
-goto do_commit
-
-
-:same_branch
-echo.
-echo Режим: commit + push в текущую ветку: %CURRENT_BRANCH%
-goto ask_commit_msg
-
-
-:create_branch
-echo.
-echo Режим: создать новую ветку от %CURRENT_BRANCH% и push туда.
-set /p NEWBRANCH=Введите имя новой ветки (например: devflow-simple-ma-1): 
-
+set /p NEWBRANCH=Enter new branch name: 
 if "%NEWBRANCH%"=="" (
-    echo Имя ветки не задано. Отмена.
-    echo.
-    pause
-    exit /b 1
+    echo Empty branch name. Aborting.
+    goto END
 )
 
-echo.
-echo Создаю новую ветку: %NEWBRANCH%
 git checkout -b "%NEWBRANCH%"
 if errorlevel 1 (
-    echo Ошибка при создании ветки. Отмена.
-    echo.
-    pause
-    exit /b 1
+    echo ERROR: Failed to create new branch.
+    goto END
 )
 set CURRENT_BRANCH=%NEWBRANCH%
-goto ask_commit_msg
+goto ASK_COMMIT
 
 
-:do_commit
-echo Добавляю все изменения: git add .
+:ASK_COMMIT
+echo.
+set /p commitmsg=Enter commit message (leave empty for auto): 
+if "%commitmsg%"=="" (
+    set commitmsg=Auto commit %date% %time%
+)
+
+echo Using commit message:
+echo "%commitmsg%"
+echo.
+
+echo Adding files...
 git add .
 
-echo.
-echo Делаю commit...
+echo Committing...
 git commit -m "%commitmsg%"
 if errorlevel 1 (
     echo.
-    echo ВОЗМОЖНО: нет изменений для коммита ^(nothing to commit^).
-    echo Проверяю статус...
+    echo WARNING: Nothing to commit or commit failed.
     echo.
-    git status
-    echo.
-    pause
-    exit /b 1
+    goto END
 )
 
 echo.
-echo Отправляю ветку "%CURRENT_BRANCH%" на origin: git push -u origin %CURRENT_BRANCH%
+echo Pushing changes...
 git push -u origin %CURRENT_BRANCH%
 if errorlevel 1 (
     echo.
-    echo Ошибка при git push.
-    echo Проверь подключение к интернету и права к репозиторию.
+    echo ERROR: Git push failed.
+    echo Check your network, SSH keys or permissions.
     echo.
-    pause
-    exit /b 1
+    goto END
 )
 
 echo.
 echo ==========================================
-echo   ГОТОВО! Изменения отправлены.
+echo   SUCCESS! Changes pushed to GitHub.
 echo ==========================================
 echo.
+goto END
 
-echo Текущая ветка: %CURRENT_BRANCH%
-echo Репозиторий: https://github.com/alnikovs/trading-ai-lab
+
+:END
 echo.
-
-if not "%CURRENT_BRANCH%"=="main" (
-    echo Ветка НЕ main. Можно открыть PR:
-    echo   Ссылка для PR (сравнение с main):
-    echo   https://github.com/alnikovs/trading-ai-lab/compare/main...%CURRENT_BRANCH%?expand=1
-    echo.
-) else (
-    echo Изменения в main. На сервере достаточно сделать:
-    echo   cd C:\Bot\trading-ai-lab
-    echo   git pull
-    echo   restart_orchestrator.bat  ^(или вручную uvicorn^)
-    echo.
-)
-
-pause
+echo Press ANY KEY to close this window...
+pause >nul
 exit /b 0
