@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from orchestrator.config import CursorConfig
 from orchestrator.prompts import BUILDER_LLM_SYSTEM_PROMPT
 from orchestrator.dev_agent_store import get_dev_agent_store
+from orchestrator.devflow_prompts import build_devflow_system_prompt
 
 logger = logging.getLogger("orchestrator.cursor_client")
 
@@ -24,6 +25,7 @@ async def create_cursor_agent(
     task_text: str,
     auto_create_pr: bool = True,
     branch_name: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> CursorAgentCreateResult:
     api_key = CursorConfig.API_KEY
     base_url = CursorConfig.BASE_URL
@@ -38,8 +40,11 @@ async def create_cursor_agent(
 
     url = f"{base_url}/v0/agents"
 
-    # Объединяем системный промпт builder-агента с задачей пользователя
-    full_prompt = f"{BUILDER_LLM_SYSTEM_PROMPT}\n\n---\n\nTASK: {task_text}"
+    # Используем переданный системный промпт или дефолтный BUILDER_LLM_SYSTEM_PROMPT
+    effective_system_prompt = system_prompt if system_prompt is not None else BUILDER_LLM_SYSTEM_PROMPT
+    
+    # Объединяем системный промпт с задачей пользователя
+    full_prompt = f"{effective_system_prompt}\n\n---\n\nTASK: {task_text}"
 
     payload: dict = {
         "prompt": {
@@ -216,13 +221,17 @@ async def create_devflow_step_agent(
         flow_id, step, chat_id
     )
     
-    # Оборачиваем шаг DevFlow в задачу для Cursor
-    task_text = (
-        f"[DevFlow simple_ma | flow_id={flow_id} | step={step}]\n\n"
-        f"{step_prompt}"
-    )
+    # Строим системный промпт для DevFlow с подстановкой задачи шага
+    devflow_system_prompt = build_devflow_system_prompt(step_prompt)
+    
+    # Формируем task_text (может быть пустым или содержать дополнительный контекст)
+    task_text = f"[DevFlow simple_ma | flow_id={flow_id} | step={step}]"
 
-    result = await create_cursor_agent(task_text=task_text, auto_create_pr=True)
+    result = await create_cursor_agent(
+        task_text=task_text,
+        auto_create_pr=True,
+        system_prompt=devflow_system_prompt,
+    )
 
     # Регистрируем агента в DevAgentStore с флагами DevFlow
     store = get_dev_agent_store()

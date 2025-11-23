@@ -151,216 +151,212 @@ def build_step_completed_message(session: DevFlowSession, step_summary: str) -> 
 # Набор шагов для DevFlow simple_ma
 DEVFLOW_SIMPLE_MA_STEPS: List[Dict[str, Any]] = [
     {
-        "id": "prepare_simple_ma_structure",
-        "title": "Подготовка стратегии simple_ma",
+        "id": "simple_ma_impl",
+        "title": "Implement simple MA strategy core logic",
         "description": (
-            "Создать и/или привести в порядок структуру стратегии Simple Moving Average (SimpleMAStrategy): "
-            "конфиг, класс стратегии, базовые проверки и каркас методов, чтобы следующий шаг мог "
-            "сосредоточиться только на торговой логике."
+            "Implement a working simple moving average (SMA) trading strategy in "
+            "trading/strategies/simple_ma.py with signal generation logic."
         ),
         "cursor_task_prompt": """
-You are an AI developer working on the AI Quant Fund trading bot project.
+GOAL:
 
-This is **DevFlow simple_ma – Step 1/3: Prepare simple_ma strategy structure**.
+Implement a working simple moving average (SMA) trading strategy in:
 
-Goal of this step:
-- Ensure that `trading/strategies/simple_ma.py` contains a clean, production-ready skeleton for a Simple Moving Average strategy (SimpleMAStrategy) with a separate immutable config and basic validation, ready for signal logic implementation in the next step.
+- trading/strategies/simple_ma.py
 
-Context:
-- Repo structure (key files):
-  - `trading/strategies/base.py`  — base strategy interfaces and common logic
-  - `trading/models.py`          — MarketState, PositionState, TradeSignal, Side, etc.
-  - `trading/strategies/simple_ma.py` — the file for SimpleMAStrategy implementation
 
-IMPORTANT: All user-facing messages in Telegram must remain in Russian. Do NOT change Telegram texts or DevFlow user messages to English.
-
-Requirements for this step (you MUST do real code changes, not just planning):
-
-1) **Strategy config**
-   - Define a config dataclass for the strategy, e.g. `SimpleMAConfig`, with at least:
-     - `short_window: int`
-     - `long_window: int`
-     - `min_confidence: float` (0.0–1.0 range)
-   - Provide validation logic so that:
-     - `short_window >= 1`
-     - `long_window > short_window`
-     - `0.0 <= min_confidence <= 1.0`
-   - Make config immutable (frozen dataclass) and suitable to be passed around safely.
-
-2) **Strategy class skeleton**
-   - Implement or refactor `SimpleMAStrategy` in `trading/strategies/simple_ma.py` so that it:
-     - Inherits from the appropriate base (check `trading/strategies/base.py`, e.g. `Strategy` / `BaseStrategy`).
-     - Accepts the config object in the constructor and stores it.
-     - Has a clear internal state for price history (you may initialize it here, logic will be filled in Step 2).
-     - Exposes public methods required by the base class (e.g. `on_market_state`, `reset`, etc.) as working stubs.
-
-3) **Validation and error handling**
-   - Ensure invalid config values raise clear exceptions early (e.g. ValueError with informative messages).
-   - Keep the code simple and explicit; avoid premature optimization.
-
-4) **Code quality and style**
-   - Follow the existing code style in the project.
-   - Add type hints where appropriate.
-   - Add docstrings to the config and the strategy class, briefly explaining what they do.
-
-5) **Tests / sanity checks**
-   - If there are existing tests that touch `simple_ma`, make sure they still import and run.
-   - If no tests exist yet, at least ensure that the module imports cleanly and that constructing `SimpleMAConfig` and `SimpleMAStrategy` works without runtime errors for valid configs.
-
-VERY IMPORTANT:
-- This step MUST produce real code changes in `trading/strategies/simple_ma.py` (and related files if needed), not just a "plan".
-- Do NOT leave the summary as "No code changes were made". Make the best reasonable implementation based on the current project structure.
-- Do NOT modify the language of Telegram messages; they must stay Russian.
-- If you need to make small supportive changes in other modules (e.g. imports, minor helpers) to keep things consistent — do it.
-
-At the end of this step:
-- The project should import without errors.
-- `SimpleMAConfig` and `SimpleMAStrategy` should exist and form a clean, validated skeleton ready for SMA logic in Step 2.
-- In your summary, briefly describe:
-  - What exactly was changed (files, classes, functions).
-  - Any assumptions you made.
-  - Any TODOs you intentionally left for the next steps.
-        """.strip(),
-    },
-    {
-        "id": "implement_simple_ma_logic",
-        "title": "Реализация логики Simple Moving Average",
-        "description": (
-            "Реализовать торговую логику SMA в SimpleMAStrategy: вести окно цен, считать короткую и длинную "
-            "средние, генерировать сигналы BUY/SELL/FLAT с учётом min_confidence и текущего состояния позиции."
-        ),
-        "cursor_task_prompt": """
-You are an AI developer working on the AI Quant Fund trading bot project.
-
-This is **DevFlow simple_ma – Step 2/3: Implement Simple Moving Average trading logic**.
-
-Goal of this step:
-- Implement the actual SMA-based trading logic inside `SimpleMAStrategy` in `trading/strategies/simple_ma.py`, using the config and skeleton prepared in Step 1.
 
 Context:
-- Use the existing project models:
-  - `MarketState` and `PositionState` from `trading/models.py`
-  - `TradeSignal` and `Side` (BUY / SELL / FLAT)
-- The strategy should:
-  - Maintain a rolling history of recent prices.
-  - Compute short and long moving averages.
-  - Emit trading signals based on the crossover and confidence.
 
-IMPORTANT: All user-facing messages in Telegram must remain in Russian. Do NOT change Telegram texts or DevFlow user messages to English.
+- Core types are defined in trading/models.py (Side, MarketState, PositionState, TradeSignal).
 
-Requirements (real code changes, not just planning):
+- The base strategy interface is defined in trading/strategies/base.py.
 
-1) **Price history and state**
-   - Store the last N prices needed to compute both short and long windows.
-   - Ensure that until there is enough data (less than `long_window` prices), the strategy returns `None` / FLAT (depending on project conventions) and does NOT produce invalid signals.
-   - Provide a `reset()` method that clears internal state.
+- This project is research-only and used for simulations/backtesting, not for real-money trading.
 
-2) **SMA computation**
-   - Implement helpers (private methods) to:
-     - Ingest a new price from `MarketState` (e.g. mid-price, last trade price, or a selected field — choose a reasonable one and document it).
-     - Compute short and long simple moving averages over the history.
-   - Make sure the code is numerically simple and easy to read.
 
-3) **Signal generation**
-   - Implement logic that:
-     - Emits a BUY signal when the short MA crosses above the long MA with sufficient confidence.
-     - Emits a SELL signal when the short MA crosses below the long MA with sufficient confidence.
-     - Otherwise returns FLAT / no signal.
-   - Use `min_confidence` from the config to modulate the confidence value in `TradeSignal`.
-   - Incorporate `PositionState` so that:
-     - You don't repeatedly emit the same signal on every tick if the position is already aligned with the signal.
-     - You can choose to be conservative (e.g. avoid flipping too often). Document any design choices.
-
-4) **Integration with `on_market_state`**
-   - `on_market_state` should:
-     - Take `MarketState` and `PositionState`.
-     - Update internal state with the new price.
-     - Decide whether to emit a `TradeSignal` or return `None` / FLAT.
-   - Make sure types and return values are consistent with the base strategy interface and with `TradeSignal` from `trading/models.py`.
-
-5) **Basic tests / self-check**
-   - If tests for this strategy already exist, adjust the implementation so that they pass.
-   - If tests do not yet exist, you may add simple sanity checks or minimal tests (but the full testing will be done in Step 3).
-   - At minimum, verify that:
-     - The strategy can be instantiated with a valid config.
-     - Feeding a sequence of prices that clearly exhibits a crossover produces at least one BUY or SELL signal as expected (you can test this in code inside the module or via a small helper).
-
-IMPORTANT:
-- This step MUST modify `trading/strategies/simple_ma.py` to contain a working first version of SMA trading logic.
-- Avoid leaving TODO-only stubs. Make a reasonable, consistent implementation that future agents can refine.
-- Do NOT modify user-facing Telegram texts; they must stay Russian.
-- In your summary, clearly list:
-  - The exact decision rule for BUY/SELL/FLAT.
-  - How you computed confidence.
-  - Any assumptions or limitations (e.g. which price from MarketState is used).
-        """.strip(),
-    },
-    {
-        "id": "test_and_validate_simple_ma",
-        "title": "Тесты и валидация simple_ma",
-        "description": (
-            "Написать и/или доработать unit-тесты для SimpleMAStrategy: сценарии BUY/SELL/FLAT, проверки валидации "
-            "конфига, поведения при недостатке данных. Запустить pytest и убедиться, что всё зелёное."
-        ),
-        "cursor_task_prompt": """
-You are an AI developer working on the AI Quant Fund trading bot project.
-
-This is **DevFlow simple_ma – Step 3/3: Tests and validation for SimpleMAStrategy**.
-
-Goal of this step:
-- Add or refine unit tests for `SimpleMAStrategy` so that the SMA strategy is covered by meaningful, passing tests.
-
-Context:
-- Strategy implementation: `trading/strategies/simple_ma.py`
-- Models: `trading/models.py`
-- Existing tests: check `tests/` and `tests/trading/` to see how other strategies or components are tested.
-
-IMPORTANT: All user-facing messages in Telegram must remain in Russian. Do NOT change Telegram texts or DevFlow user messages to English.
 
 Requirements:
 
-1) **Test file and structure**
-   - Create or update a test module, e.g.:
-     - `tests/trading/strategies/test_simple_ma.py`
-   - Follow the existing project test style (pytest is expected).
-   - Import `SimpleMAConfig`, `SimpleMAStrategy`, `MarketState`, `PositionState`, `Side`, `TradeSignal` as needed.
+1) In `trading/strategies/simple_ma.py`, implement or refactor a class like `SimpleMAStrategy` that:
 
-2) **Positive scenarios (signals)**
-   - Add tests that cover at least:
-     - BUY scenario: a price series where the short SMA clearly crosses above the long SMA and a BUY signal is expected.
-     - SELL scenario: a price series where the short SMA clearly crosses below the long SMA and a SELL signal is expected.
-     - FLAT / no-signal scenario: a price series with no strong crossover or where the position is already aligned and no new signal should be emitted.
-   - Check not just the `Side`, but also that the confidence is in a reasonable range and respects `min_confidence`.
+   - Inherits from the common base strategy interface in `trading/strategies/base.py`.
 
-3) **Config validation tests**
-   - Add tests that validate creation of `SimpleMAConfig`:
-     - Invalid short/long window combinations should raise an exception.
-     - Invalid `min_confidence` (e.g. < 0 or > 1) should raise an exception.
-   - Make sure error messages are understandable.
+   - Accepts configuration (e.g. SMA window length) via __init__ or a config object.
 
-4) **Edge cases**
-   - Test behavior when there is not enough history to compute both SMAs:
-     - The strategy should not crash.
-     - It should return `None` / FLAT (depending on your implementation) until enough data is collected.
-   - Optionally, test behavior when prices are constant or very noisy.
+   - Exposes a method such as:
 
-5) **Running tests**
-   - Run the full test suite with `pytest` from the project root (or at least the tests for this strategy).
-   - Fix any failures related to `simple_ma` implementation or tests.
-   - Do NOT skip failing tests silently; fix the root causes where possible.
+     `generate_signal(market_state: MarketState, position_state: PositionState) -> TradeSignal`.
 
-VERY IMPORTANT:
-- This step MUST create or update real test files.
-- Do NOT leave this as "planning tests only"; the goal is to have tests that actually run and pass.
-- Do NOT modify Telegram user-facing texts; they must stay Russian.
-- In your summary, briefly include:
-  - The path to the test file(s) you added/modified.
-  - A short description of each main test scenario.
-  - The result of `pytest` (e.g. "pytest passed for all tests", or what is still failing and why, if anything remains).
 
-At the end of this step:
-- `SimpleMAStrategy` should be covered by meaningful tests.
-- `pytest` should pass for at least the new tests; ideally for the whole project if feasible.
+
+2) Trading logic:
+
+   - Compute a simple moving average over the last N close prices (N = window).
+
+   - If the latest price crosses ABOVE the SMA and we are FLAT or SHORT -> return a BUY signal.
+
+   - If the latest price crosses BELOW the SMA and we are FLAT or LONG -> return a SELL signal.
+
+   - Otherwise -> return a FLAT/no-trade signal.
+
+
+
+3) Code quality:
+
+   - Use type hints.
+
+   - Add a clear module-level docstring and class/method docstrings.
+
+   - Keep the strategy deterministic and easy to test.
+
+
+
+4) Non-empty diff requirement:
+
+   - You MUST actually modify `trading/strategies/simple_ma.py`.
+
+   - Even if something is already implemented, improve or refactor it so that the final diff is not empty.
+
+
+
+Constraints:
+
+- Do NOT wire this directly to any real-money exchange.
+
+- Do NOT provide financial advice; focus purely on strategy logic.
+
+
+
+Output:
+
+- Apply code changes to the repository.
+
+- Then reply with a short summary of what you changed and which files you touched.
+        """.strip(),
+    },
+    {
+        "id": "simple_ma_tests",
+        "title": "Add tests for simple MA strategy",
+        "description": (
+            "Create pytest tests for the simple moving average strategy in "
+            "tests/test_simple_ma.py covering BUY/SELL/FLAT scenarios."
+        ),
+        "cursor_task_prompt": """
+GOAL:
+
+Create pytest tests for the simple moving average strategy implemented in:
+
+- trading/strategies/simple_ma.py
+
+
+
+Requirements:
+
+1) Create or update:
+
+   - tests/test_simple_ma.py
+
+
+
+2) Test scenarios (at least these):
+
+   - A price series where the last price clearly crosses ABOVE the SMA -> expect a BUY signal.
+
+   - A price series where the last price clearly crosses BELOW the SMA -> expect a SELL signal.
+
+   - A sideways/no-crossover scenario -> expect FLAT/no-trade signal.
+
+   - A scenario where we already hold a LONG position and there is another BUY crossover -> behavior should match the strategy's design (e.g. either FLAT or some specific logic); assert whatever is implemented.
+
+
+
+3) Tests should:
+
+   - Import MarketState, PositionState, Side, TradeSignal from `trading/models.py`.
+
+   - Import the strategy class from `trading/strategies/simple_ma.py`.
+
+   - Build explicit deterministic price series and market states in the test code.
+
+
+
+4) Non-empty diff requirement:
+
+   - You MUST create or meaningfully update `tests/test_simple_ma.py` so that the tests are useful and would pass if the strategy is correctly implemented.
+
+
+
+Output:
+
+- Apply changes to the test file(s).
+
+- Then reply with a short summary describing the tests you added.
+        """.strip(),
+    },
+    {
+        "id": "simple_ma_integration",
+        "title": "Integrate simple MA strategy into trader agent",
+        "description": (
+            "Integrate the simple moving average strategy into the trader agent "
+            "so it can be selected and used in trading/trader_agent_l1.py."
+        ),
+        "cursor_task_prompt": """
+GOAL:
+
+Integrate the simple moving average strategy into the trader agent so it can be selected and used.
+
+
+
+Files to touch:
+
+- trading/trader_agent_l1.py
+
+- (Optionally) imports in trading/strategies/simple_ma.py if needed.
+
+
+
+Requirements:
+
+1) In `trading/trader_agent_l1.py`:
+
+   - Ensure there is a clear way to construct `SimpleMAStrategy` by name or configuration.
+
+   - For example, extend a strategy factory or mapping so that the name "simple_ma"
+
+     maps to `SimpleMAStrategy` with configurable parameters (e.g. window length).
+
+
+
+2) Behavior:
+
+   - The trader agent should be able to accept "simple_ma" as a strategy choice
+
+     and call the strategy's `generate_signal(...)` method to produce TradeSignal objects.
+
+
+
+3) Keep integration minimal:
+
+   - Do NOT add real-money exchange wiring here.
+
+   - Focus on in-process orchestration and strategy selection.
+
+
+
+4) Non-empty diff requirement:
+
+   - You MUST modify `trading/trader_agent_l1.py` (and related imports if needed) with real code changes.
+
+   - Even if some integration already exists, refactor/improve it so there is a meaningful non-empty diff.
+
+
+
+Output:
+
+- Apply the integration changes.
+
+- Then reply with a short summary of how you wired the strategy into the trader agent.
         """.strip(),
     },
 ]
