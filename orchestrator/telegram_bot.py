@@ -225,6 +225,10 @@ async def handle_telegram_update(
         return
 
     # --- DevFlow: команда /devflow_simple_ma ---
+    # Примечание: Текущая реализация использует систему подтверждений через DevFlowSession.
+    # Новая архитектура DevFlow v1.0 (orchestrator/devflow.py) готова к использованию
+    # и может быть интегрирована в будущем для автоматических шагов (RUN_TESTS, SERVER_UPDATE).
+    # Для CURSOR_TASK шагов сохранена текущая логика с подтверждениями пользователя.
     if text_lower == "/devflow_simple_ma":
         existing_session = DevFlowStore.get_session(chat_id)
         if existing_session and existing_session.state in (

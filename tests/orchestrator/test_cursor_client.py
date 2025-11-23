@@ -48,7 +48,8 @@ class TestCreateCursorAgent:
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args
         payload = call_args[1]["json"]
-        assert payload["prompt"]["text"] == "Test task"
+        # Проверяем, что текст задачи присутствует в расширенном системном промпте
+        assert "Test task" in payload["prompt"]["text"]
         assert payload["source"]["repository"] == "test/repo"
         assert payload["source"]["ref"] == "main"
         assert payload["target"]["autoCreatePr"] is True

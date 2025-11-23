@@ -95,7 +95,8 @@ class TestSendTelegramMessage:
         result = await send_telegram_message("123", "Test message")
         
         assert result is False
-        assert mock_client.post.call_count == 2
+        # Теперь у нас 3 попытки (основная + 2 ретрая)
+        assert mock_client.post.call_count == 3
     
     @patch("orchestrator.telegram_bot.TelegramConfig")
     @patch("httpx.AsyncClient")
@@ -111,7 +112,8 @@ class TestSendTelegramMessage:
         result = await send_telegram_message("123", "Test message")
         
         assert result is False
-        assert mock_client.post.call_count == 2
+        # Теперь у нас 3 попытки (основная + 2 ретрая)
+        assert mock_client.post.call_count == 3
     
     @patch("orchestrator.telegram_bot.TelegramConfig")
     async def test_send_message_invalid_user_id(self, mock_config):
