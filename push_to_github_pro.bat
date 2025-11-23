@@ -21,24 +21,6 @@ echo Pulling latest main from origin...
 git pull origin main
 
 echo.
-echo Checking for local changes...
-git diff --quiet
-if %errorlevel%==0 (
-    echo ------------------------------------------
-    echo No local changes detected. Nothing to push.
-    echo ------------------------------------------
-    echo.
-    echo Press any key to exit...
-    pause >nul
-    goto END
-)
-
-echo ------------------------------------------
-echo Local changes detected:
-echo ------------------------------------------
-git status
-echo.
-
 echo Staging all changed files...
 git add .
 
@@ -59,15 +41,13 @@ echo Commit message:
 echo   %COMMIT_MSG%
 echo.
 
-echo Committing...
+echo Committing (if there is something new)...
 git commit -m "%COMMIT_MSG%"
 if errorlevel 1 (
     echo.
-    echo Commit failed (maybe nothing to commit).
-    echo ------------------------------------------
-    echo Press any key to exit...
-    pause >nul
-    goto END
+    echo No new changes to commit OR commit failed.
+    echo Continuing to push any existing local commits...
+    echo.
 )
 
 echo.
@@ -83,5 +63,4 @@ echo.
 echo Press any key to exit...
 pause >nul
 
-:END
 endlocal
