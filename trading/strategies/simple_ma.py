@@ -1,9 +1,15 @@
-"""Single-window simple moving average crossover strategy."""
+"""Simple moving average (SMA) crossover strategy.
+
+This module provides a lightweight, deterministic strategy that issues trade
+signals when the latest price crosses its N-period simple moving average. It is
+designed for research/backtesting use only and does not interact with live
+markets directly.
+"""
 
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Deque, Optional
 
 from trading.models import MarketState, PositionState, Side, TradeSignal
@@ -27,6 +33,44 @@ class SimpleMAConfig:
             raise ValueError("min_confidence must be between 0 and 1.")
 
 
+@dataclass
+class SMAWindow:
+    """Rolling window helper that computes an N-period simple moving average."""
+
+    length: int
+    _values: Deque[float] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.length < 2:
+            raise ValueError("SMA window must be >= 2.")
+        self._values = deque(maxlen=self.length)
+
+    def push(self, value: float) -> Optional[float]:
+        """Add a new value and return the latest SMA when enough data exists."""
+
+        self._values.append(value)
+        return self.current
+
+    @property
+    def is_ready(self) -> bool:
+        """Return True once the window is fully populated."""
+
+        return len(self._values) == self.length
+
+    @property
+    def current(self) -> Optional[float]:
+        """Return the current SMA value or None if not enough data."""
+
+        if not self.is_ready:
+            return None
+        return sum(self._values) / self.length
+
+    def clear(self) -> None:
+        """Remove all stored prices."""
+
+        self._values.clear()
+
+
 class SimpleMAStrategy(Strategy):
     """Generates trade signals based on price/SMA crossovers."""
 
@@ -45,13 +89,8 @@ class SimpleMAStrategy(Strategy):
             trade_size=trade_size,
             min_confidence=min_confidence,
         )
-        self._prices: Deque[float] = deque(maxlen=self.config.window)
+        self._sma_window = SMAWindow(length=self.config.window)
         self._previous_diff: Optional[float] = None
-
-    def _compute_sma(self) -> Optional[float]:
-        if len(self._prices) < self.config.window:
-            return None
-        return sum(self._prices) / len(self._prices)
 
     def _can_buy(self, position_state: Optional[PositionState]) -> bool:
         if position_state is None:
@@ -68,14 +107,10 @@ class SimpleMAStrategy(Strategy):
         market_state: MarketState,
         position_state: Optional[PositionState],
     ) -> Optional[TradeSignal]:
-        """
-        Produce a TradeSignal when price crosses the configured SMA window.
-        """
+        """Produce a TradeSignal when the price crosses the configured SMA."""
 
         price = market_state.price
-        self._prices.append(price)
-
-        sma = self._compute_sma()
+        sma = self._sma_window.push(price)
         if sma is None:
             # Not enough data collected yet.
             self._previous_diff = None
@@ -120,3 +155,9 @@ class SimpleMAStrategy(Strategy):
         """Adapter to the base Strategy interface."""
 
         return self.generate_signal(market_state=market_state, position_state=position)
+
+    def reset(self) -> None:
+        """Clear cached SMA values so the strategy can be reused in a new run."""
+
+        self._sma_window.clear()
+        self._previous_diff = None
