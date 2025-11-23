@@ -28,7 +28,8 @@ if %errorlevel%==0 (
     echo No local changes detected. Nothing to push.
     echo ------------------------------------------
     echo.
-    pause
+    echo Press any key to exit...
+    pause >nul
     goto END
 )
 
@@ -43,12 +44,14 @@ git add .
 
 echo.
 echo Creating auto-commit message...
-for /f "tokens=1-3 delims=/- " %%a in ("%date%") do (
+
+for /f "tokens=1-3 delims=./ " %%a in ("%date%") do (
+    set DD=%%a
+    set MM=%%b
     set YYYY=%%c
-    set MM=%%a
-    set DD=%%b
 )
-for /f "tokens=1 delims= " %%a in ("%time%") do set HHMMSS=%%a
+
+for /f "tokens=1 delims=." %%a in ("%time%") do set HHMMSS=%%a
 
 set COMMIT_MSG=Auto-commit %YYYY%-%MM%-%DD% %HHMMSS%
 
@@ -61,8 +64,9 @@ git commit -m "%COMMIT_MSG%"
 if errorlevel 1 (
     echo.
     echo Commit failed (maybe nothing to commit).
-    echo.
-    pause
+    echo ------------------------------------------
+    echo Press any key to exit...
+    pause >nul
     goto END
 )
 
@@ -75,7 +79,9 @@ echo ==========================================
 echo   AUTO PUSH COMPLETE
 echo ==========================================
 echo.
-pause
+
+echo Press any key to exit...
+pause >nul
 
 :END
 endlocal
