@@ -227,11 +227,11 @@ async def create_devflow_step_agent(
     # Формируем task_text (может быть пустым или содержать дополнительный контекст)
     task_text = f"[DevFlow simple_ma | flow_id={flow_id} | step={step}]"
 
-    # DevFlow runs in "dev mode": we want agents to commit directly to the base branch
-    # (CursorConfig.BASE_REF, typically "main") instead of opening PRs in cursor/* branches.
+    # DevFlow uses PR-based workflow: Cursor creates a cursor/* branch and a PR.
+    # After the flow finishes, we merge the PR into main via GitHub / automation.
     result = await create_cursor_agent(
         task_text=task_text,
-        auto_create_pr=False,  # DevFlow: commit directly to base_ref (e.g. main), no PR
+        auto_create_pr=True,  # use PR-based workflow: Cursor creates cursor/* branch + PR
         system_prompt=devflow_system_prompt,
     )
 
