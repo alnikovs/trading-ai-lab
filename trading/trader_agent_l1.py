@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
 from trading.models import MarketState, PositionState, TradeSignal
 from trading.risk_interface import RiskEngineInterface
 from trading.strategies.base import Strategy
-from trading.strategies.simple_ma import SimpleMovingAverageStrategy
+from trading.strategies.simple_ma import SimpleMAConfig, SimpleMAStrategy
 
 StrategyConfig = Dict[str, Any]
 StrategyFactory = Callable[[StrategyConfig], Strategy]
@@ -14,19 +14,26 @@ StrategyFactory = Callable[[StrategyConfig], Strategy]
 
 def _simple_ma_factory(config: StrategyConfig) -> Strategy:
     """
-    Build a SimpleMovingAverageStrategy from a generic config payload.
+    Build a SimpleMAStrategy from a generic config payload.
     Expected config keys:
         - strategy_id: unique identifier per strategy instance
         - symbol: instrument symbol
-        - params (optional): dict with overrides for short_window, long_window, min_confidence
+        - params (optional): dict with overrides for window, trade_size, min_confidence
     """
     params = config.get("params", {}) or {}
-    return SimpleMovingAverageStrategy(
+    if not isinstance(params, dict):
+        raise ValueError("simple_ma strategy params must be provided as a dict")
+    try:
+        sma_config = SimpleMAConfig(**params)
+    except TypeError as exc:
+        raise ValueError(f"invalid params for simple_ma strategy: {params}") from exc
+
+    return SimpleMAStrategy(
         strategy_id=config["strategy_id"],
         symbol=config["symbol"],
-        short_window=params.get("short_window", 10),
-        long_window=params.get("long_window", 30),
-        min_confidence=params.get("min_confidence", 0.6),
+        window=sma_config.window,
+        trade_size=sma_config.trade_size,
+        min_confidence=sma_config.min_confidence,
     )
 
 
