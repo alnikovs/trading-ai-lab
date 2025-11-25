@@ -1,10 +1,10 @@
-"""Single-window simple moving average crossover strategy."""
+"""Research-only simple moving average crossover strategy for backtests."""
 
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Optional
+from typing import Deque, Iterable, Optional
 
 from trading.models import MarketState, PositionState, Side, TradeSignal
 from trading.strategies.base import Strategy
@@ -28,7 +28,7 @@ class SimpleMAConfig:
 
 
 class SimpleMAStrategy(Strategy):
-    """Generates trade signals based on price/SMA crossovers."""
+    """Generates trade signals when the latest price crosses its SMA."""
 
     def __init__(
         self,
@@ -38,6 +38,7 @@ class SimpleMAStrategy(Strategy):
         window: int = 20,
         trade_size: float = 1.0,
         min_confidence: float = 0.05,
+        initial_prices: Optional[Iterable[float]] = None,
     ) -> None:
         super().__init__(strategy_id=strategy_id, symbol=symbol)
         self.config = SimpleMAConfig(
@@ -47,6 +48,8 @@ class SimpleMAStrategy(Strategy):
         )
         self._prices: Deque[float] = deque(maxlen=self.config.window)
         self._previous_diff: Optional[float] = None
+        if initial_prices:
+            self.seed_prices(initial_prices)
 
     def _compute_sma(self) -> Optional[float]:
         if len(self._prices) < self.config.window:
@@ -63,13 +66,48 @@ class SimpleMAStrategy(Strategy):
             return True
         return position_state.side in {Side.FLAT, Side.BUY}
 
+    def seed_prices(self, prices: Iterable[float]) -> None:
+        """
+        Preload price history to warm up the SMA window, useful in tests.
+        """
+
+        for price in prices:
+            self._prices.append(float(price))
+
+        last_price = self._prices[-1] if self._prices else None
+        sma = self._compute_sma()
+        self._previous_diff = (
+            None if last_price is None or sma is None else last_price - sma
+        )
+
+    @property
+    def is_warmed_up(self) -> bool:
+        """Return True when enough prices were observed to compute the SMA."""
+
+        return len(self._prices) >= self.config.window
+
+    def _calculate_confidence(self, diff: float, sma: float) -> float:
+        """
+        Convert the diff value to a 0..1 confidence score with safe zero handling.
+        """
+
+        if sma == 0:
+            return 1.0 if diff != 0 else 0.0
+        return min(1.0, abs(diff) / abs(sma))
+
     def generate_signal(
         self,
         market_state: MarketState,
         position_state: Optional[PositionState],
     ) -> Optional[TradeSignal]:
         """
-        Produce a TradeSignal when price crosses the configured SMA window.
+        Produce a trade signal when the latest price crosses the configured SMA.
+
+        The signal is emitted only when:
+        - the SMA window is warmed up,
+        - a crossover happens,
+        - the current position permits acting on that crossover,
+        - the computed confidence exceeds the configured threshold.
         """
 
         price = market_state.price
@@ -97,7 +135,7 @@ class SimpleMAStrategy(Strategy):
         if side is None:
             return None
 
-        confidence = min(1.0, abs(diff) / sma)
+        confidence = self._calculate_confidence(diff, sma)
         if confidence < self.config.min_confidence:
             return None
 
